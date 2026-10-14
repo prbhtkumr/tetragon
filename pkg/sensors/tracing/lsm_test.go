@@ -14,9 +14,9 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/tetragon/api/v1/tetragon"
@@ -186,7 +186,23 @@ spec:
 	require.NoError(t, err)
 }
 
+// TestLSMOverrideAction verifies an Override action delivers the configured
+// argError to the traced process, using the historical argError: -1.
 func TestLSMOverrideAction(t *testing.T) {
+	testLSMOverrideAction(t, -1)
+}
+
+// TestLSMOverrideActionErrno pins #5781: an Override argError other than -1
+// must be delivered verbatim (-13 -> EACCES), not collapsed to EPERM by the
+// zero-extension of the map-loaded value in set_if_not_errno_or_zero()
+// (bpf/process/types/basic.h). Before the fix every nonzero argError on the
+// LSM path surfaced as EPERM, indistinguishable from -1, which is why the
+// -1-only test above never caught it.
+func TestLSMOverrideActionErrno(t *testing.T) {
+	testLSMOverrideAction(t, -13)
+}
+
+func testLSMOverrideAction(t *testing.T, argError int) {
 	if !bpf.HasLSMPrograms() || !config.EnableLargeProgs() {
 		t.Skip()
 	}
@@ -224,7 +240,7 @@ spec:
           - "` + testBin + `"
       matchActions:
       - action: Override
-        argError: -1
+        argError: ` + strconv.Itoa(argError) + `
 `
 
 	createCrdFile(t, configHook)
@@ -247,9 +263,15 @@ spec:
 
 	testCmd := exec.Command(testBin)
 
-	testCmd.Run()
-
-	assert.Equal(t, -1, testCmd.ProcessState.ExitCode(), "Exit code should be -1")
+	// The override makes bprm_check_security return the configured errno,
+	// so the child's execve fails with exactly that errno and the process
+	// never starts. Assert the errno on the error itself: ProcessState is
+	// nil here, and ExitCode() would report the same -1 for any start
+	// failure, override or not.
+	err = testCmd.Run()
+	require.Error(t, err, "exec of %s should be denied by the Override action", testBin)
+	require.ErrorIs(t, err, syscall.Errno(-argError),
+		"execve must fail with the configured argError (%d), not any other errno", argError)
 
 	err = jsonchecker.JsonTestCheck(t, ec.NewUnorderedEventChecker(lsmChecker))
 	require.NoError(t, err)

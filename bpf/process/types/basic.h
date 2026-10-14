@@ -2785,12 +2785,18 @@ FUNC_INLINE const struct path *get_path(long type, unsigned long arg, struct pat
 
 #define __STR(x) #x
 
+/* x must be an lvalue without side effects: it is read into the temp and
+ * written back, so an indexed or incrementing lvalue would be evaluated
+ * twice. The only call site passes a plain local.
+ */
 #define set_if_not_errno_or_zero(x, y)                  \
 	({                                              \
+		long __errno_val = (x);                 \
 		asm volatile("if %0 s< -4095 goto +1\n" \
 			     "if %0 s<= 0 goto +1\n"    \
 			     "%0 = " __STR(y) "\n"      \
-			     : "+r"(x));                \
+			     : "+r"(__errno_val));      \
+		(x) = __errno_val;                      \
 	})
 
 FUNC_INLINE int try_override(void *ctx, struct bpf_map_def *override_tasks)
