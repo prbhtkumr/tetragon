@@ -1504,6 +1504,7 @@ func createMultiUprobeSensor(polInfo *policyInfo, sensorPath string, multiIDs []
 	var progs []*program.Program
 	var maps []*program.Map
 	var substringMapEntries int
+	var selectorState *selectors.KernelSelectorState
 	var regsMapEntries int
 
 	data := &genericStackTraceData{}
@@ -1514,6 +1515,7 @@ func createMultiUprobeSensor(polInfo *policyInfo, sensorPath string, multiIDs []
 			return nil, nil, err
 		}
 		selector := gu.loadArgs.selectors.entry
+		selectorState = selector
 		if gu.loadArgs.retprobe {
 			multiRetIDs = append(multiRetIDs, id)
 			selector = gu.loadArgs.selectors.retrn
@@ -1560,7 +1562,7 @@ func createMultiUprobeSensor(polInfo *policyInfo, sensorPath string, multiIDs []
 	maps = append(maps, getUprobeHeapMap("string_postfix_maps_heap", has.uprobeHeapSize, load))
 	maps = append(maps, getUprobeHeapMap("ratelimit_heap", has.uprobeHeapSize, load))
 	maps = append(maps, configMap, tailCalls, filterMap, retProbe)
-	maps = append(maps, createSelectorMaps(load, getUprobeProgramSelector(load, nil), substringMapEntries)...)
+	maps = append(maps, createSelectorMaps(load, selectorState, substringMapEntries)...)
 
 	if has.sleepableOffload {
 		regsMap := program.MapBuilderProgram("regs_map", load)
@@ -1609,7 +1611,7 @@ func createMultiUprobeSensor(polInfo *policyInfo, sensorPath string, multiIDs []
 
 		retFilterMap := program.MapBuilderProgram("filter_map", loadret)
 		maps = append(maps, retFilterMap)
-		maps = append(maps, createSelectorMaps(loadret, getUprobeProgramSelector(loadret, nil), substringMapEntries)...)
+		maps = append(maps, createSelectorMaps(loadret, selectorState, substringMapEntries)...)
 
 		retTailCalls := program.MapBuilderProgram("retuprobe_calls", loadret)
 		maps = append(maps, retTailCalls)
